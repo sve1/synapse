@@ -1,0 +1,530 @@
+import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from "react";
+
+// ---------- inline icons (no external deps) ----------
+const Icon = ({ children, size = 16, color = "currentColor", style }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8"
+       strokeLinecap="round" strokeLinejoin="round" style={style}>{children}</svg>
+);
+const IconSearch = (p) => <Icon {...p}><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></Icon>;
+const IconSettings = (p) => <Icon {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></Icon>;
+const IconHome = (p) => <Icon {...p}><path d="M3 9.5 12 3l9 6.5"/><path d="M5 10v10h14V10"/></Icon>;
+const IconBriefcase = (p) => <Icon {...p}><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></Icon>;
+const IconPlus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
+const IconX = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Icon>;
+const IconGrip = (p) => <Icon {...p}><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></Icon>;
+const IconChevronRight = (p) => <Icon {...p}><polyline points="9 18 15 12 9 6"/></Icon>;
+const IconAtom = (p) => <Icon {...p}><circle cx="12" cy="12" r="1"/><ellipse cx="12" cy="12" rx="10" ry="4.2"/><ellipse cx="12" cy="12" rx="10" ry="4.2" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4.2" transform="rotate(120 12 12)"/></Icon>;
+
+// ---------- helpers ----------
+const deepClone = (o) =>
+  typeof structuredClone === "function" ? structuredClone(o) : JSON.parse(JSON.stringify(o));
+
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+const CATEGORY_COLORS = [
+  { name: "Rosa", value: "#c97b84" },
+  { name: "Areia", value: "#d4a373" },
+  { name: "Sálvia", value: "#8fa998" },
+  { name: "Azul", value: "#7c94b0" },
+  { name: "Malva", value: "#a8899f" },
+  { name: "Oliva", value: "#8a9a5b" },
+];
+
+const PRIORITIES = [
+  { key: "baixa", label: "Baixa", color: "#8b8f98" },
+  { key: "media", label: "Média", color: "#c99a4a" },
+  { key: "alta", label: "Alta", color: "#b8534f" },
+];
+
+const TABS = [
+  { key: "pessoal", label: "Pessoal", accent: "#c97b84", Icon: IconHome },
+  { key: "profissional", label: "Profissional", accent: "#7c94b0", Icon: IconBriefcase },
+];
+
+const STORAGE_KEY = "synapse-mindmap-data";
+
+const emptyData = () => ({
+  pessoal: { categories: [] },
+  profissional: { categories: [] },
+});
+
+const newCategory = (name, color) => ({ id: uid(), name, color, expanded: true, tasks: [] });
+const newTask = (title) => ({ id: uid(), title, description: "", priority: "media", dueDate: "", done: false, checklist: [] });
+
+function isOverdue(dueDate, done) {
+  if (!dueDate || done) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(dueDate + "T00:00:00") < today;
+}
+function formatDate(iso) {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}`;
+}
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : emptyData();
+  } catch (e) {
+    return emptyData();
+  }
+}
+
+// ---------- main component ----------
+function MindMapTasks() {
+  const [data, setData] = useState(loadData);
+  const [activeTab, setActiveTab] = useState("pessoal");
+  const [panelTask, setPanelTask] = useState(null);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatColor, setNewCatColor] = useState(CATEGORY_COLORS[0].value);
+  const [links, setLinks] = useState([]);
+  const [tick, setTick] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [draggedCatId, setDraggedCatId] = useState(null);
+  const [dragOverCatId, setDragOverCatId] = useState(null);
+  const [confirmState, setConfirmState] = useState(null);
+
+  const containerRef = useRef(null);
+  const nodeRefs = useRef({});
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+  }, [data]);
+
+  const setNodeRef = useCallback((id) => (el) => {
+    if (el) nodeRefs.current[id] = el;
+    else delete nodeRefs.current[id];
+  }, []);
+
+  const tabData = data[activeTab];
+
+  const visibleCategories = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return tabData.categories;
+    return tabData.categories
+      .map((cat) => {
+        const catMatches = cat.name.toLowerCase().includes(q);
+        const tasks = catMatches ? cat.tasks : cat.tasks.filter((t) => t.title.toLowerCase().includes(q));
+        if (!catMatches && tasks.length === 0) return null;
+        return { ...cat, tasks };
+      })
+      .filter(Boolean);
+  }, [tabData, searchQuery]);
+
+  function pathBetween(fromEl, toEl) {
+    const fx = fromEl.offsetLeft + fromEl.offsetWidth;
+    const fy = fromEl.offsetTop + fromEl.offsetHeight / 2;
+    const tx = toEl.offsetLeft;
+    const ty = toEl.offsetTop + toEl.offsetHeight / 2;
+    const midX = fx + (tx - fx) / 2;
+    return `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
+  }
+
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    const compute = () => {
+      const centerEl = nodeRefs.current["center"];
+      if (!centerEl) return;
+      const newLinks = [];
+      visibleCategories.forEach((cat) => {
+        const catEl = nodeRefs.current[cat.id];
+        if (catEl) newLinks.push(pathBetween(centerEl, catEl));
+      });
+      setLinks(newLinks);
+    };
+    const raf = requestAnimationFrame(compute);
+    return () => cancelAnimationFrame(raf);
+  }, [visibleCategories, activeTab, tick, panelTask]);
+
+  useEffect(() => {
+    const onResize = () => setTick((t) => t + 1);
+    window.addEventListener("resize", onResize);
+    const ro = new ResizeObserver(() => setTick((t) => t + 1));
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      ro.disconnect();
+    };
+  }, []);
+
+  function askConfirm(message, onConfirm) { setConfirmState({ message, onConfirm }); }
+
+  function updateTab(mutator) {
+    setData((prev) => {
+      const next = { ...prev };
+      next[activeTab] = mutator(deepClone(prev[activeTab]));
+      return next;
+    });
+  }
+
+  function addCategory() {
+    const name = newCatName.trim();
+    if (!name) return;
+    updateTab((tab) => { tab.categories.push(newCategory(name, newCatColor)); return tab; });
+    setNewCatName("");
+    setNewCatColor(CATEGORY_COLORS[0].value);
+    setAddingCategory(false);
+  }
+
+  function deleteCategory(catId) {
+    const cat = tabData.categories.find((c) => c.id === catId);
+    if (!cat) return;
+    askConfirm(`Excluir a categoria "${cat.name}" e todas as suas tarefas?`, () => {
+      updateTab((tab) => { tab.categories = tab.categories.filter((c) => c.id !== catId); return tab; });
+      setConfirmState(null);
+    });
+  }
+
+  function toggleExpand(catId) {
+    updateTab((tab) => { const c = tab.categories.find((c) => c.id === catId); if (c) c.expanded = !c.expanded; return tab; });
+  }
+
+  function reorderCategory(draggedId, targetId) {
+    if (!draggedId || draggedId === targetId) return;
+    updateTab((tab) => {
+      const fromIdx = tab.categories.findIndex((c) => c.id === draggedId);
+      const toIdx = tab.categories.findIndex((c) => c.id === targetId);
+      if (fromIdx === -1 || toIdx === -1) return tab;
+      const [moved] = tab.categories.splice(fromIdx, 1);
+      tab.categories.splice(toIdx, 0, moved);
+      return tab;
+    });
+  }
+
+  function openNewTask(catId) { setPanelTask({ categoryId: catId, isNew: true, draft: newTask("") }); }
+  function openTask(catId, taskId) { setPanelTask({ categoryId: catId, taskId }); }
+  function saveNewTask(catId, task) {
+    if (!task.title.trim()) return;
+    updateTab((tab) => { const cat = tab.categories.find((c) => c.id === catId); if (cat) cat.tasks.push(task); return tab; });
+    setPanelTask(null);
+  }
+  function patchTask(catId, taskId, patch) {
+    updateTab((tab) => {
+      const cat = tab.categories.find((c) => c.id === catId);
+      const t = cat && cat.tasks.find((t) => t.id === taskId);
+      if (t) Object.assign(t, patch);
+      return tab;
+    });
+  }
+  function moveTaskToCategory(fromCatId, taskId, toCatId) {
+    if (fromCatId === toCatId) return;
+    updateTab((tab) => {
+      const fromCat = tab.categories.find((c) => c.id === fromCatId);
+      const toCat = tab.categories.find((c) => c.id === toCatId);
+      const idx = fromCat.tasks.findIndex((t) => t.id === taskId);
+      if (idx === -1) return tab;
+      const [task] = fromCat.tasks.splice(idx, 1);
+      toCat.tasks.push(task);
+      return tab;
+    });
+    setPanelTask({ categoryId: toCatId, taskId });
+  }
+  function deleteTask(catId, taskId) {
+    askConfirm("Excluir esta tarefa?", () => {
+      updateTab((tab) => { const cat = tab.categories.find((c) => c.id === catId); if (cat) cat.tasks = cat.tasks.filter((t) => t.id !== taskId); return tab; });
+      setPanelTask(null);
+      setConfirmState(null);
+    });
+  }
+  function toggleTaskDone(catId, taskId) {
+    updateTab((tab) => {
+      const cat = tab.categories.find((c) => c.id === catId);
+      const t = cat && cat.tasks.find((t) => t.id === taskId);
+      if (t) t.done = !t.done;
+      return tab;
+    });
+  }
+
+  const tabMeta = TABS.find((t) => t.key === activeTab);
+  const openTaskObj = panelTask && !panelTask.isNew
+    ? tabData.categories.find((c) => c.id === panelTask.categoryId)?.tasks.find((t) => t.id === panelTask.taskId)
+    : null;
+
+  return (
+    <div style={styles.app}>
+      <div style={styles.sidebar}>
+        <div style={styles.logoRow}>
+          <IconAtom size={22} color="#dba18e" />
+          <span style={styles.logoText}>synapse</span>
+        </div>
+        <div style={styles.searchRow}>
+          <IconSearch size={15} color="#6b6f78" />
+          <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="buscar" style={styles.searchInput} />
+        </div>
+        <div style={styles.settingsRow}>
+          <IconSettings size={15} color="#6b6f78" />
+          <span>configurações</span>
+        </div>
+        <div style={styles.sectionLabel}>meus mapas</div>
+        <div>
+          {TABS.map((t) => {
+            const selected = activeTab === t.key;
+            const TIcon = t.Icon;
+            return (
+              <div key={t.key} className="mm-map-item" onClick={() => setActiveTab(t.key)}
+                   style={{ ...styles.mapItem, background: selected ? "rgba(255,255,255,0.06)" : "transparent", borderLeft: selected ? `2px solid ${t.accent}` : "2px solid transparent" }}>
+                <TIcon size={15} color={selected ? t.accent : "#71757e"} />
+                <span style={{ color: selected ? "#eceae4" : "#9a9ea6" }}>{t.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={styles.main}>
+        <div style={styles.mainHeader}>
+          <span style={styles.mainHeaderText}>mapa mental: {tabMeta.label.toLowerCase()}</span>
+        </div>
+
+        <div ref={containerRef} className="mm-scroll" style={styles.canvas}>
+          <svg width={containerRef.current?.scrollWidth || "100%"} height={containerRef.current?.scrollHeight || "100%"} style={styles.svg}>
+            {links.map((d, i) => <path key={i} d={d} stroke="#c9bfa8" strokeWidth="1.5" fill="none" />)}
+          </svg>
+
+          <div style={styles.treeWrap}>
+            <div ref={setNodeRef("center")} style={{ ...styles.centerNode, borderColor: tabMeta.accent }}>{tabMeta.label}</div>
+
+            <div style={styles.categoryStack}>
+              {visibleCategories.length === 0 && !addingCategory && (
+                <div style={styles.emptyState}>
+                  {searchQuery ? "Nenhum resultado para essa busca." : `Nenhuma categoria ainda. Crie a primeira para começar a mapear suas ${activeTab === "pessoal" ? "tarefas pessoais" : "tarefas profissionais"}.`}
+                </div>
+              )}
+
+              {visibleCategories.map((cat) => (
+                <div key={cat.id} ref={setNodeRef(cat.id)} className="mm-node" draggable
+                     onDragStart={() => setDraggedCatId(cat.id)}
+                     onDragEnd={() => { setDraggedCatId(null); setDragOverCatId(null); }}
+                     onDragOver={(e) => { e.preventDefault(); if (dragOverCatId !== cat.id) setDragOverCatId(cat.id); }}
+                     onDrop={(e) => { e.preventDefault(); reorderCategory(draggedCatId, cat.id); setDragOverCatId(null); }}
+                     style={{ ...styles.categoryCard, borderLeft: `3px solid ${cat.color}`, opacity: draggedCatId === cat.id ? 0.4 : 1, outline: dragOverCatId === cat.id && draggedCatId !== cat.id ? `2px dashed ${cat.color}` : "none", outlineOffset: 2 }}>
+                  <div style={styles.categoryHeaderRow}>
+                    <IconGrip size={13} color="#4a4d54" style={{ cursor: "grab", flexShrink: 0 }} />
+                    <span style={styles.categoryName} onClick={() => toggleExpand(cat.id)}>{cat.name}</span>
+                    <span style={styles.taskCount}>{cat.tasks.filter((t) => !t.done).length}/{cat.tasks.length}</span>
+                    <IconChevronRight size={14} color="#71757e" onClick={() => toggleExpand(cat.id)}
+                      style={{ cursor: "pointer", transform: cat.expanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s ease" }} />
+                    <div style={styles.categoryActions}>
+                      <button className="mm-node-btn" style={styles.iconBtn} onClick={() => openNewTask(cat.id)} title="Nova tarefa"><IconPlus size={12} /></button>
+                      <button className="mm-node-btn" style={styles.iconBtn} onClick={() => deleteCategory(cat.id)} title="Excluir categoria"><IconX size={12} /></button>
+                    </div>
+                  </div>
+
+                  {cat.expanded && (
+                    <div style={styles.taskList}>
+                      {cat.tasks.map((t) => {
+                        const overdue = isOverdue(t.dueDate, t.done);
+                        const prio = PRIORITIES.find((p) => p.key === t.priority);
+                        const pillColor = overdue ? "#b8534f" : prio.color;
+                        const pillText = t.dueDate ? formatDate(t.dueDate) : prio.label.toLowerCase();
+                        return (
+                          <div key={t.id} style={styles.taskRow} onClick={() => openTask(cat.id, t.id)}>
+                            <div onClick={(e) => { e.stopPropagation(); toggleTaskDone(cat.id, t.id); }}
+                                 style={{ ...styles.checkbox, background: t.done ? cat.color : "transparent", borderColor: cat.color }}>{t.done ? "✓" : ""}</div>
+                            <span style={{ ...styles.taskRowTitle, textDecoration: t.done ? "line-through" : "none", opacity: t.done ? 0.5 : 1 }}>{t.title}</span>
+                            <span style={{ ...styles.pill, color: pillColor, background: pillColor + "26" }}>{pillText}</span>
+                          </div>
+                        );
+                      })}
+                      <div style={styles.addTaskRow} onClick={() => openNewTask(cat.id)}>
+                        <IconPlus size={12} color="#71757e" /><span>adicionar tarefa</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {addingCategory ? (
+                <div style={styles.addCategoryForm}>
+                  <input autoFocus value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
+                         onKeyDown={(e) => e.key === "Enter" && addCategory()} placeholder="Nome da categoria" style={styles.input} />
+                  <div style={{ display: "flex", gap: 6, margin: "8px 0" }}>
+                    {CATEGORY_COLORS.map((c) => (
+                      <div key={c.value} onClick={() => setNewCatColor(c.value)}
+                           style={{ width: 18, height: 18, borderRadius: "50%", background: c.value, cursor: "pointer",
+                                    boxShadow: newCatColor === c.value ? "0 0 0 2px #23262d, 0 0 0 3.5px #eceae4" : "none" }} />
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button style={styles.primaryBtnSm} onClick={addCategory}>Criar</button>
+                    <button style={styles.secondaryBtnSm} onClick={() => setAddingCategory(false)}>Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <button style={styles.addCategoryBtn} onClick={() => setAddingCategory(true)}>+ Nova categoria</button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {panelTask && (
+        <>
+          <div style={styles.overlay} onClick={() => setPanelTask(null)} />
+          <TaskPanel
+            key={panelTask.isNew ? "new" : panelTask.taskId}
+            mode={panelTask.isNew ? "new" : "edit"}
+            categories={tabData.categories}
+            categoryId={panelTask.categoryId}
+            task={panelTask.isNew ? panelTask.draft : openTaskObj}
+            onClose={() => setPanelTask(null)}
+            onSaveNew={(task) => saveNewTask(panelTask.categoryId, task)}
+            onPatch={(patch) => patchTask(panelTask.categoryId, panelTask.taskId, patch)}
+            onDelete={() => deleteTask(panelTask.categoryId, panelTask.taskId)}
+            onMove={(toCatId) => moveTaskToCategory(panelTask.categoryId, panelTask.taskId, toCatId)}
+          />
+        </>
+      )}
+
+      {confirmState && (
+        <div style={styles.confirmOverlay} onClick={() => setConfirmState(null)}>
+          <div style={styles.confirmCard} onClick={(e) => e.stopPropagation()}>
+            <p style={styles.confirmMessage}>{confirmState.message}</p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button style={styles.secondaryBtnSm} onClick={() => setConfirmState(null)}>Cancelar</button>
+              <button style={styles.dangerBtnSm} onClick={confirmState.onConfirm}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskPanel({ mode, categories, categoryId, task, onClose, onSaveNew, onPatch, onDelete, onMove }) {
+  const [draft, setDraft] = useState(task);
+  const [newItem, setNewItem] = useState("");
+
+  useEffect(() => setDraft(task), [task]);
+
+  function commit(patch) {
+    const next = { ...draft, ...patch };
+    setDraft(next);
+    if (mode === "edit") onPatch(patch);
+  }
+  function addChecklistItem() {
+    const text = newItem.trim();
+    if (!text) return;
+    commit({ checklist: [...draft.checklist, { id: uid(), text, done: false }] });
+    setNewItem("");
+  }
+  function toggleChecklistItem(id) { commit({ checklist: draft.checklist.map((i) => (i.id === id ? { ...i, done: !i.done } : i)) }); }
+  function removeChecklistItem(id) { commit({ checklist: draft.checklist.filter((i) => i.id !== id) }); }
+
+  return (
+    <div style={styles.panel}>
+      <div style={styles.panelHeader}>
+        <span style={styles.panelHeaderLabel}>{mode === "new" ? "Nova tarefa" : "Detalhes"}</span>
+        <button style={styles.iconBtnPlain} onClick={onClose}><IconX size={16} /></button>
+      </div>
+
+      <div style={styles.panelBody} className="mm-scroll">
+        <input autoFocus placeholder="Título da tarefa" value={draft.title} onChange={(e) => commit({ title: e.target.value })}
+               style={{ ...styles.input, fontSize: 16, fontWeight: 600, marginBottom: 14 }} />
+        <textarea placeholder="Descrição (opcional)" value={draft.description} onChange={(e) => commit({ description: e.target.value })}
+                  style={{ ...styles.input, minHeight: 70, resize: "vertical", marginBottom: 16 }} />
+
+        <label style={styles.fieldLabel}>Prioridade</label>
+        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+          {PRIORITIES.map((p) => (
+            <button key={p.key} onClick={() => commit({ priority: p.key })}
+                    style={{ ...styles.priorityChip, borderColor: draft.priority === p.key ? p.color : "rgba(255,255,255,0.1)", color: draft.priority === p.key ? p.color : "#8b8f98" }}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <label style={styles.fieldLabel}>Prazo</label>
+        <input type="date" value={draft.dueDate} onChange={(e) => commit({ dueDate: e.target.value })} style={{ ...styles.input, marginBottom: 16, colorScheme: "dark" }} />
+
+        {mode === "edit" && categories.length > 1 && (
+          <>
+            <label style={styles.fieldLabel}>Categoria</label>
+            <select value={categoryId} onChange={(e) => onMove(e.target.value)} style={{ ...styles.input, marginBottom: 16 }}>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </>
+        )}
+
+        <label style={styles.fieldLabel}>Checklist</label>
+        <div style={{ marginBottom: 10 }}>
+          {draft.checklist.map((item) => (
+            <div key={item.id} style={styles.checklistRow}>
+              <div onClick={() => toggleChecklistItem(item.id)} style={{ ...styles.checkboxSm, background: item.done ? "#8fa998" : "transparent" }}>{item.done ? "✓" : ""}</div>
+              <span style={{ flex: 1, textDecoration: item.done ? "line-through" : "none", color: item.done ? "#71757e" : "#d7d5cf" }}>{item.text}</span>
+              <button style={styles.iconBtnPlain} onClick={() => removeChecklistItem(item.id)}><IconX size={13} /></button>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input placeholder="Adicionar item…" value={newItem} onChange={(e) => setNewItem(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addChecklistItem()} style={{ ...styles.input, flex: 1 }} />
+          <button style={styles.secondaryBtnSm} onClick={addChecklistItem}>Add</button>
+        </div>
+      </div>
+
+      <div style={styles.panelFooter}>
+        {mode === "new"
+          ? <button style={styles.primaryBtn} onClick={() => onSaveNew(draft)} disabled={!draft.title.trim()}>Criar tarefa</button>
+          : <button style={styles.dangerBtn} onClick={onDelete}>Excluir tarefa</button>}
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  app: { display: "flex", height: "100%", minHeight: 560, background: "#1a1c22", color: "#eceae4", fontFamily: "'Inter', sans-serif", position: "relative", overflow: "hidden" },
+  sidebar: { width: 220, flexShrink: 0, background: "#191b21", borderRight: "1px solid rgba(255,255,255,0.06)", padding: "20px 14px", display: "flex", flexDirection: "column" },
+  logoRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 22, padding: "0 4px" },
+  logoText: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17, letterSpacing: 0.2, color: "#eceae4" },
+  searchRow: { display: "flex", alignItems: "center", gap: 8, padding: "8px 8px", borderRadius: 7, marginBottom: 4 },
+  searchInput: { background: "none", border: "none", outline: "none", color: "#c7c5be", fontSize: 13, flex: 1 },
+  settingsRow: { display: "flex", alignItems: "center", gap: 8, padding: "8px 8px", borderRadius: 7, color: "#71757e", fontSize: 13, marginBottom: 18, cursor: "default" },
+  sectionLabel: { fontSize: 10.5, color: "#565a63", textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 600, padding: "0 8px", marginBottom: 8 },
+  mapItem: { display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 6, fontSize: 13, fontWeight: 500, marginBottom: 2 },
+  main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "#f2ece1" },
+  mainHeader: { padding: "20px 28px 12px 28px", flexShrink: 0 },
+  mainHeaderText: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 19, color: "#2b2b28" },
+  canvas: { position: "relative", flex: 1, overflow: "auto", padding: "20px 40px 60px 40px" },
+  svg: { position: "absolute", top: 0, left: 0, pointerEvents: "none" },
+  treeWrap: { display: "flex", alignItems: "center", gap: 64 },
+  centerNode: { flexShrink: 0, padding: "14px 26px", borderRadius: 12, background: "#23262d", border: "1px solid", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14.5, color: "#eceae4", whiteSpace: "nowrap" },
+  categoryStack: { display: "flex", flexDirection: "column", gap: 16, width: 300 },
+  categoryCard: { background: "#23262d", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 14px", position: "relative", cursor: "grab" },
+  categoryHeaderRow: { display: "flex", alignItems: "center", gap: 7 },
+  categoryName: { flex: 1, fontSize: 13.5, fontWeight: 600, color: "#eceae4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" },
+  taskCount: { fontSize: 11, color: "#71757e" },
+  categoryActions: { position: "absolute", top: 10, right: 10, display: "flex", gap: 2 },
+  iconBtn: { background: "rgba(255,255,255,0.07)", border: "none", color: "#c7c5be", width: 20, height: 20, borderRadius: 5, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  iconBtnPlain: { background: "none", border: "none", color: "#71757e", cursor: "pointer", padding: "0 2px", display: "flex", alignItems: "center" },
+  taskList: { marginTop: 10, display: "flex", flexDirection: "column", gap: 2 },
+  taskRow: { display: "flex", alignItems: "center", gap: 8, padding: "6px 2px", borderRadius: 6, cursor: "pointer" },
+  checkbox: { width: 15, height: 15, borderRadius: 4, border: "1.5px solid", fontSize: 10, lineHeight: "13px", textAlign: "center", color: "#14161a", fontWeight: 700, flexShrink: 0, cursor: "pointer" },
+  taskRowTitle: { flex: 1, fontSize: 12.5, color: "#d7d5cf", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  pill: { fontSize: 10, fontWeight: 600, borderRadius: 20, padding: "2px 8px", flexShrink: 0 },
+  addTaskRow: { display: "flex", alignItems: "center", gap: 6, padding: "6px 2px", marginTop: 2, fontSize: 11.5, color: "#71757e", cursor: "pointer" },
+  emptyState: { color: "#8b8580", fontSize: 13, maxWidth: 320, lineHeight: 1.6 },
+  addCategoryBtn: { background: "none", border: "1px dashed rgba(0,0,0,0.15)", color: "#8b8580", borderRadius: 10, padding: "10px 12px", fontSize: 13, cursor: "pointer", fontFamily: "'Inter', sans-serif" },
+  addCategoryForm: { background: "#23262d", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 10 },
+  input: { width: "100%", background: "#1a1c22", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "8px 10px", color: "#eceae4", fontSize: 13, outline: "none" },
+  primaryBtnSm: { background: "#8fa998", border: "none", color: "#14161a", fontWeight: 600, fontSize: 12, borderRadius: 6, padding: "6px 12px", cursor: "pointer" },
+  secondaryBtnSm: { background: "none", border: "1px solid rgba(255,255,255,0.14)", color: "#c7c5be", fontSize: 12, borderRadius: 6, padding: "6px 12px", cursor: "pointer" },
+  dangerBtnSm: { background: "#b8534f", border: "none", color: "#f2ece1", fontWeight: 600, fontSize: 12, borderRadius: 6, padding: "6px 12px", cursor: "pointer" },
+  overlay: { position: "absolute", inset: 0, background: "rgba(0,0,0,0.35)" },
+  panel: { position: "absolute", top: 0, right: 0, bottom: 0, width: 340, background: "#191c22", borderLeft: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", boxShadow: "-10px 0 30px rgba(0,0,0,0.35)" },
+  panelHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 18px", borderBottom: "1px solid rgba(255,255,255,0.06)" },
+  panelHeaderLabel: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 13, color: "#8b8f98", textTransform: "uppercase", letterSpacing: 0.5 },
+  panelBody: { flex: 1, overflow: "auto", padding: "16px 18px" },
+  fieldLabel: { display: "block", fontSize: 11, color: "#71757e", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6, fontWeight: 600 },
+  priorityChip: { flex: 1, background: "#14161a", border: "1px solid", borderRadius: 6, padding: "6px 0", fontSize: 12, fontWeight: 600, cursor: "pointer" },
+  checklistRow: { display: "flex", alignItems: "center", gap: 8, padding: "5px 0" },
+  checkboxSm: { width: 15, height: 15, borderRadius: 4, border: "1.5px solid #8fa998", fontSize: 10, lineHeight: "12px", textAlign: "center", color: "#14161a", fontWeight: 700, flexShrink: 0, cursor: "pointer" },
+  panelFooter: { padding: "14px 18px", borderTop: "1px solid rgba(255,255,255,0.06)" },
+  primaryBtn: { width: "100%", background: "#8fa998", border: "none", color: "#14161a", fontWeight: 700, fontSize: 13.5, borderRadius: 8, padding: "10px 0", cursor: "pointer" },
+  dangerBtn: { width: "100%", background: "none", border: "1px solid #b8534f55", color: "#b8534f", fontWeight: 600, fontSize: 13, borderRadius: 8, padding: "10px 0", cursor: "pointer" },
+  confirmOverlay: { position: "absolute", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 },
+  confirmCard: { background: "#23262d", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 18, width: 280 },
+  confirmMessage: { fontSize: 13, color: "#d7d5cf", lineHeight: 1.5, margin: "0 0 14px 0" },
+};
+
+export default MindMapTasks;

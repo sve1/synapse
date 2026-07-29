@@ -1,0 +1,9 @@
+html, body { margin: 0; padding: 0; height: 100%; background: #1a1c22; }
+  #root { height: 100vh; }
+  * { box-sizing: border-box; }
+  .mm-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .mm-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 4px; }
+  .mm-node-btn { opacity: 0; transition: opacity .15s ease; }
+  .mm-node:hover .mm-node-btn { opacity: 1; }
+  .mm-map-item { transition: background .15s ease; cursor: pointer; }
+  input, textarea, select { font-family: 'Inter', sans-serif; }
