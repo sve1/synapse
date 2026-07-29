@@ -1,0 +1,149 @@
+import React, { useEffect, useState } from "react";
+import { Atom } from "lucide-react";
+
+interface SplashScreenProps {
+  onComplete: () => void;
+}
+
+export default function SplashScreen({ onComplete }: SplashScreenProps) {
+  const [fadeOut, setFadeOut] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFadeOut(true);
+      setTimeout(() => onComplete(), 600);
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [onComplete]);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "linear-gradient(135deg, #1a1c22 0%, #23262d 100%)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 9999,
+        opacity: fadeOut ? 0 : 1,
+        transition: "opacity 0.6s ease-out",
+        pointerEvents: fadeOut ? "none" : "auto",
+      }}
+    >
+      {/* Logo */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: 32,
+          animation: "fadeInScale 0.8s ease-out",
+        }}
+      >
+        <Atom size={56} color="#dba18e" strokeWidth={1.5} />
+      </div>
+
+      {/* Main Title */}
+      <h1
+        style={{
+          fontFamily: "'Space Grotesk', sans-serif",
+          fontWeight: 700,
+          fontSize: 48,
+          color: "#eceae4",
+          margin: 0,
+          marginBottom: 12,
+          textAlign: "center",
+          animation: "fadeInUp 0.8s ease-out 0.1s both",
+        }}
+      >
+        synapse
+      </h1>
+
+      {/* Subtitle */}
+      <p
+        style={{
+          fontFamily: "'Inter', sans-serif",
+          fontWeight: 500,
+          fontSize: 18,
+          color: "#c9bfa8",
+          margin: 0,
+          textAlign: "center",
+          letterSpacing: 1.2,
+          animation: "fadeInUp 0.8s ease-out 0.2s both",
+        }}
+      >
+        Think.Plan.Execute
+      </p>
+
+      {/* Loading indicator */}
+      <div
+        style={{
+          marginTop: 48,
+          display: "flex",
+          gap: 8,
+          animation: "fadeIn 0.8s ease-out 0.3s both",
+        }}
+      >
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: "#8fa998",
+              animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite`,
+            }}
+          />
+        ))}
+      </div>
+
+      <style>{`
+        @keyframes fadeInScale {
+          from {
+            opacity: 0;
+            transform: scale(0.8);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 0.3;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
